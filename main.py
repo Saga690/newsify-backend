@@ -5,7 +5,7 @@ import os
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from logic import generate_fact_based_seo_content
+from logic import generate_fact_based_seo_content, extract_topics, fetch_news_links, extract_full_news_content, store_in_vector_db
 
 
 MONGO_URI = os.getenv("MONGO_URI")
@@ -54,6 +54,10 @@ class QueryInput(BaseModel):
 @app.post("/generate-seo-content")
 async def generate_seo_content(data: QueryInput):
     try:
+        r1 = extract_topics(data.query)
+        r2 = fetch_news_links(r1["main_topic"], max_articles=3)
+        r3 = extract_full_news_content(r2["articles"])
+        r4 = store_in_vector_db(r3["articles"])
         response = generate_fact_based_seo_content(data.query)
         # asyncio.create_task(generate_fact_based_seo_content(data.query))
         # response = "backend working"

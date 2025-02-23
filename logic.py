@@ -30,6 +30,167 @@ embedding_model = SentenceTransformer("thenlper/gte-small")
 # ✅ Use Llama3-70B-8192 for Content Generation
 llm = ChatGroq(model_name="llama3-70b-8192", api_key=grok_api_key)
 
+def extract_topics(user_query):
+    """
+    Uses a small LLM to extract the main topic and geographic sub-topics from the user's query.
+    
+    Args:
+        user_query (str): The user's input question.
+
+    Returns:
+        dict: JSON-formatted response with extracted topics.
+    """
+    prompt = f"""
+    You are an AI assistant that extracts the main topic from a news-related query.
+    
+    **Rules for Extraction:**
+    1. Identify the **main topic**.
+    **Examples:**
+    **Input:** "Tell me about elections in India"
+    **Output:**
+    {{
+        "main_topic": "India Elections",
+    }}
+
+    **Input:** "What is happening in Uttar Pradesh?"
+    **Output:**
+    {{
+        "main_topic": "Uttar Pradesh News",
+    }}
+
+    **Input:** "Give me the latest updates on the stock market"
+    **Output:**
+    {{
+        "main_topic": "Stock Market Updates",
+    }}
+
+    Now, process the following query and return the result in **valid JSON format**:
+    "{user_query}"
+    """
+
+    response = client.chat.completions.create(
+        model="mixtral-8x7b-32768",  # Using Mistral on Groq
+        messages=[{"role": "system", "content": "Extract key topics in JSON format."},
+                  {"role": "user", "content": prompt}],
+        temperature=0.3
+    )
+
+    result = response.choices[0].message.content.strip()
+    
+    try:
+        return json.loads(result)  # Ensure JSON format
+    except json.JSONDecodeError:
+        return {"error": "Failed to parse response"}
+
+def fetch_news_links(query, max_articles=5):
+    """
+    Fetches news article links using PyGoogleNews.
+
+    Args:
+        query (str): The search query (e.g., 'India Elections').
+        max_articles (int): Maximum number of articles to retrieve.
+
+    Returns:
+        dict: JSON-formatted response containing news articles.
+    """
+    gn = GoogleNews()
+    search_results = gn.search(query)
+
+    news_links = []
+    count = 0
+
+    for entry in search_results["entries"]:
+        if count >= max_articles:
+            break
+
+        news_links.append({
+            "title": entry.title,
+            "url": entry.link,
+            "published_at": entry.published
+        })
+        count += 1
+
+    return {"query": query, "articles": news_links}
+
+class NewsArticle(BaseModel):
+    title: str = Field(description="The title of the news article")
+    author: str = Field(description="The author of the news article")
+    publication_date: str = Field(description="The publication date of the news article")
+    content: str = Field(description="The full content of the news article")
+
+def extract_full_news_content(articles):
+    """
+    Extracts the full content of news articles using FireCrawl.
+
+    Args:
+        articles (list): List of article dictionaries with URLs.
+
+    Returns:
+        dict: JSON-formatted response containing the extracted content.
+    """
+    extracted_news = []
+
+    for article in articles:
+        url = article["url"]
+        try:
+            # Scrape the URL with the defined schema
+            data = app.scrape_url(
+                url,
+                params={
+                    "formats": ["extract"],
+                    "extract": {
+                        "schema": NewsArticle.model_json_schema()
+                    },
+                    "actions": [
+                        {"type": "wait", "milliseconds": 2000},  # Wait for content to load
+                        {"type": "scroll", "behavior": "smooth"}  # Scroll to load full content
+                    ]
+                }
+            )
+
+            # Extract Data
+            extracted_data = data.get("extract", {})
+            extracted_news.append({
+                "title": extracted_data.get("title", article["title"]),  # Fallback to PyGoogleNews title
+                "url": url,
+                "published_at": extracted_data.get("publication_date", article["published_at"]),
+                "author": extracted_data.get("author", "Unknown"),
+                "content": extracted_data.get("content", "Content not available.")
+            })
+
+        except Exception as e:
+            print(f"Error extracting {url}: {e}")
+
+        # Adding a small delay between requests to avoid being blocked
+        time.sleep(1.5)
+
+    return {"articles": extracted_news}
+
+def store_in_vector_db(articles):
+    """
+    Stores news articles in a vector database using Mistral embeddings.
+
+    Args:
+        articles (list): List of dictionaries containing news content.
+
+    Returns:
+        str: Confirmation message.
+    """
+    for article in articles:
+        content = article["content"]
+        embedding = embedding_model.encode(content).tolist()  # Convert to list for ChromaDB storage
+
+        # Store in vector database
+        collection.add(
+            documents=[content],
+            metadatas=[{"title": article["title"], "url": article["url"], "published_at": article["published_at"], "author": article["author"]}],
+            embeddings=[embedding],
+            ids=[article["url"]]
+        )
+
+    return "✅ News articles stored in vector database!"
+
+
 # ✅ Hallucination Grader Data Model
 class GradeHallucinations(BaseModel):
     binary_score: str = Field(description="Answer is grounded in the facts, '1' (yes) or '0' (no')")
@@ -52,8 +213,10 @@ def handle_rate_limit(func, *args, **kwargs):
 
 # ✅ Step 1: Retrieve Relevant Articles from ChromaDB
 def retrieve_relevant_articles(user_query, top_k=5):
+    print(user_query)
     query_embedding = embedding_model.encode(user_query).tolist()
     results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
+    print(results)
 
     retrieved_articles = []
     if results["documents"] and results["documents"][0]:
@@ -93,6 +256,7 @@ def extract_location_from_content(news_content):
 # ✅ Step 3: Generate SEO-Optimized Content with Auto-Retry for Hallucinations
 def generate_fact_based_seo_content(user_query, max_retries=3):
     retrieved_articles = retrieve_relevant_articles(user_query)
+    # return retrieved_articles
 
     if not retrieved_articles:
         return {
