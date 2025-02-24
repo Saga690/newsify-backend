@@ -78,6 +78,7 @@ def extract_topics(user_query):
     result = response.choices[0].message.content.strip()
     
     try:
+        print(result)
         return json.loads(result)  # Ensure JSON format
     except json.JSONDecodeError:
         return {"error": "Failed to parse response"}
@@ -187,7 +188,7 @@ def store_in_vector_db(articles):
             embeddings=[embedding],
             ids=[article["url"]]
         )
-
+    print("✅ News articles stored in vector database!")
     return "✅ News articles stored in vector database!"
 
 

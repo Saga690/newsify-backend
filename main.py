@@ -33,6 +33,8 @@ app = FastAPI(lifespan=lifespan)
 origins = [
     "http://localhost:3000",  
     "http://127.0.0.1:3000",
+    "https://newsify-frontend.vercel.app/",
+    "https://newsify-frontend-ayushs-projects-d8e7e17a.vercel.app/"
 ]
 
 app.add_middleware(
@@ -55,10 +57,15 @@ class QueryInput(BaseModel):
 async def generate_seo_content(data: QueryInput):
     try:
         r1 = extract_topics(data.query)
+        # print(f"Main Topic: {r1['main_topic']}")
         r2 = fetch_news_links(r1["main_topic"], max_articles=3)
+        # print(f"Articles: {r2['articles']}")
         r3 = extract_full_news_content(r2["articles"])
+        # print(f"Extracted Content: {r3['articles']}")
         r4 = store_in_vector_db(r3["articles"])
+        # print(f"Stored in Vector DB: {r4}")
         response = generate_fact_based_seo_content(data.query)
+        # print(f"Generated SEO Content: {response}")
         # asyncio.create_task(generate_fact_based_seo_content(data.query))
         # response = "backend working"
         return response
