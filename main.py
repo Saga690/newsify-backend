@@ -34,7 +34,7 @@ app = FastAPI(lifespan=lifespan)
 origins = [
     "http://localhost:3000",  
     "http://127.0.0.1:3000",
-    "https://newsify-frontend.vercel.app/",
+    "https://newsify-frontend.vercel.app",
     "https://newsify-frontend-ayushs-projects-d8e7e17a.vercel.app/"
 ]
 
