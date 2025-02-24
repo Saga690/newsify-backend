@@ -10,7 +10,6 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field
-import asyncio
 
 load_dotenv()
 firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
@@ -120,25 +119,53 @@ class NewsArticle(BaseModel):
     publication_date: str = Field(description="The publication date of the news article")
     content: str = Field(description="The full content of the news article")
 
-async def extract_full_news_content(articles):
+def extract_full_news_content(articles):
+    """
+    Extracts the full content of news articles using FireCrawl.
+
+    Args:
+        articles (list): List of article dictionaries with URLs.
+
+    Returns:
+        dict: JSON-formatted response containing the extracted content.
+    """
     extracted_news = []
+
     for article in articles:
         url = article["url"]
         try:
-            data = await asyncio.to_thread(app.scrape_url, url, params={...})
+            # Scrape the URL with the defined schema
+            data = app.scrape_url(
+                url,
+                params={
+                    "formats": ["extract"],
+                    "extract": {
+                        "schema": NewsArticle.model_json_schema()
+                    },
+                    "actions": [
+                        {"type": "wait", "milliseconds": 2000},  # Wait for content to load
+                        {"type": "scroll", "behavior": "smooth"}  # Scroll to load full content
+                    ]
+                }
+            )
+
+            # Extract Data
             extracted_data = data.get("extract", {})
             extracted_news.append({
-                "title": extracted_data.get("title", article["title"]),
+                "title": extracted_data.get("title", article["title"]),  # Fallback to PyGoogleNews title
                 "url": url,
                 "published_at": extracted_data.get("publication_date", article["published_at"]),
                 "author": extracted_data.get("author", "Unknown"),
                 "content": extracted_data.get("content", "Content not available.")
             })
+
         except Exception as e:
             print(f"Error extracting {url}: {e}")
-        await asyncio.sleep(1.5)  # Avoid blocking the event loop
-    return {"articles": extracted_news}
 
+        # Adding a small delay between requests to avoid being blocked
+        time.sleep(1.5)
+
+    return {"articles": extracted_news}
 
 def store_in_vector_db(articles):
     """
@@ -171,6 +198,7 @@ class GradeHallucinations(BaseModel):
     explanation: str = Field(description="Explain the reasoning for the score")
 
 def handle_rate_limit(func, *args, **kwargs):
+    """Handles rate limit errors by waiting before retrying."""
     retries = 3
     for attempt in range(retries):
         try:
@@ -181,8 +209,8 @@ def handle_rate_limit(func, *args, **kwargs):
                 print(f"⚠️ Rate limit exceeded. Waiting {wait_time}s before retrying...")
                 time.sleep(wait_time)
             else:
-                raise  # Don't retry other exceptions
-
+                raise e
+    raise Exception("🚨 Max retries exceeded. Could not complete the request.")
 
 # ✅ Step 1: Retrieve Relevant Articles from ChromaDB
 def retrieve_relevant_articles(user_query, top_k=5):

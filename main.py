@@ -17,27 +17,17 @@ db_client = AsyncIOMotorClient(MONGO_URI)
 db = db_client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
-# async def connect_to_mongo():
-#     try:
-#         await db_client.admin.command("ping") 
-#         print("Connected to MongoDB")
-#     except Exception as e:
-#         print(f"Failed to connect to MongoDB: {e}")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global db_client, db, collection
-    db_client = AsyncIOMotorClient(MONGO_URI)
-    db = db_client[DATABASE_NAME]
-    collection = db[COLLECTION_NAME]
+async def connect_to_mongo():
     try:
-        await db_client.admin.command("ping")
+        await db_client.admin.command("ping") 
         print("Connected to MongoDB")
     except Exception as e:
         print(f"Failed to connect to MongoDB: {e}")
-    yield
-    db_client.close()  # Properly close connection on shutdown
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await connect_to_mongo()
+    yield
 
 app = FastAPI(lifespan=lifespan)
 
@@ -83,5 +73,4 @@ async def generate_seo_content(data: QueryInput):
 if __name__ == "__main__":
     import uvicorn
     PORT = int(os.getenv("PORT", 10000))
-    print(f"🚀 Starting FastAPI on port {PORT}...")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
