@@ -17,17 +17,27 @@ db_client = AsyncIOMotorClient(MONGO_URI)
 db = db_client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 
-async def connect_to_mongo():
-    try:
-        await db_client.admin.command("ping") 
-        print("Connected to MongoDB")
-    except Exception as e:
-        print(f"Failed to connect to MongoDB: {e}")
+# async def connect_to_mongo():
+#     try:
+#         await db_client.admin.command("ping") 
+#         print("Connected to MongoDB")
+#     except Exception as e:
+#         print(f"Failed to connect to MongoDB: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await connect_to_mongo()
+    global db_client, db, collection
+    db_client = AsyncIOMotorClient(MONGO_URI)
+    db = db_client[DATABASE_NAME]
+    collection = db[COLLECTION_NAME]
+    try:
+        await db_client.admin.command("ping")
+        print("Connected to MongoDB")
+    except Exception as e:
+        print(f"Failed to connect to MongoDB: {e}")
     yield
+    db_client.close()  # Properly close connection on shutdown
+
 
 app = FastAPI(lifespan=lifespan)
 
