@@ -17,32 +17,22 @@ grok_api_key = os.getenv("GROQ_API_KEY")
 
 client = Groq(api_key=grok_api_key)
 
-app = FirecrawlApp(api_key = firecrawl_api_key)  # Replace with actual API key
-
+app = FirecrawlApp(api_key=firecrawl_api_key)  # Replace with actual API key
 
 # ✅ Initialize ChromaDB (Persistent Storage)
 chroma_client = chromadb.PersistentClient(path="./vector_store")
 collection = chroma_client.get_or_create_collection("news_articles")
 
-# ✅ Use Mistral-compatible embeddings (Ensure consistency)
-embedding_model = SentenceTransformer("thenlper/gte-small")
+# ✅ Use a smaller, more memory-efficient embeddings model
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ✅ Use Llama3-70B-8192 for Content Generation
 llm = ChatGroq(model_name="llama3-70b-8192", api_key=grok_api_key)
 
 def extract_topics(user_query):
-    """
-    Uses a small LLM to extract the main topic and geographic sub-topics from the user's query.
-    
-    Args:
-        user_query (str): The user's input question.
-
-    Returns:
-        dict: JSON-formatted response with extracted topics.
-    """
     prompt = f"""
     You are an AI assistant that extracts the main topic from a news-related query.
-    
+
     **Rules for Extraction:**
     1. Identify the **main topic**.
     **Examples:**
@@ -52,22 +42,9 @@ def extract_topics(user_query):
         "main_topic": "India Elections",
     }}
 
-    **Input:** "What is happening in Uttar Pradesh?"
-    **Output:**
-    {{
-        "main_topic": "Uttar Pradesh News",
-    }}
-
-    **Input:** "Give me the latest updates on the stock market"
-    **Output:**
-    {{
-        "main_topic": "Stock Market Updates",
-    }}
-
     Now, process the following query and return the result in **valid JSON format**:
     "{user_query}"
     """
-
     response = client.chat.completions.create(
         model="mixtral-8x7b-32768",  # Using Mistral on Groq
         messages=[{"role": "system", "content": "Extract key topics in JSON format."},
@@ -79,21 +56,11 @@ def extract_topics(user_query):
     
     try:
         print(result)
-        return json.loads(result)  # Ensure JSON format
+        return json.loads(result)
     except json.JSONDecodeError:
         return {"error": "Failed to parse response"}
 
-def fetch_news_links(query, max_articles=5):
-    """
-    Fetches news article links using PyGoogleNews.
-
-    Args:
-        query (str): The search query (e.g., 'India Elections').
-        max_articles (int): Maximum number of articles to retrieve.
-
-    Returns:
-        dict: JSON-formatted response containing news articles.
-    """
+def fetch_news_links(query, max_articles=3):  # Limit to 3 articles
     gn = GoogleNews()
     search_results = gn.search(query)
 
@@ -120,21 +87,11 @@ class NewsArticle(BaseModel):
     content: str = Field(description="The full content of the news article")
 
 def extract_full_news_content(articles):
-    """
-    Extracts the full content of news articles using FireCrawl.
-
-    Args:
-        articles (list): List of article dictionaries with URLs.
-
-    Returns:
-        dict: JSON-formatted response containing the extracted content.
-    """
     extracted_news = []
 
     for article in articles:
         url = article["url"]
         try:
-            # Scrape the URL with the defined schema
             data = app.scrape_url(
                 url,
                 params={
@@ -143,43 +100,31 @@ def extract_full_news_content(articles):
                         "schema": NewsArticle.model_json_schema()
                     },
                     "actions": [
-                        {"type": "wait", "milliseconds": 2000},  # Wait for content to load
-                        {"type": "scroll", "behavior": "smooth"}  # Scroll to load full content
+                        {"type": "wait", "milliseconds": 2000},
+                        {"type": "scroll", "behavior": "smooth"}
                     ]
                 }
             )
 
-            # Extract Data
             extracted_data = data.get("extract", {})
             extracted_news.append({
-                "title": extracted_data.get("title", article["title"]),  # Fallback to PyGoogleNews title
+                "title": extracted_data.get("title", article["title"]),
                 "url": url,
                 "published_at": extracted_data.get("publication_date", article["published_at"]),
                 "author": extracted_data.get("author", "Unknown"),
                 "content": extracted_data.get("content", "Content not available.")
             })
-
         except Exception as e:
             print(f"Error extracting {url}: {e}")
 
-        # Adding a small delay between requests to avoid being blocked
         time.sleep(1.5)
 
     return {"articles": extracted_news}
 
 def store_in_vector_db(articles):
-    """
-    Stores news articles in a vector database using Mistral embeddings.
-
-    Args:
-        articles (list): List of dictionaries containing news content.
-
-    Returns:
-        str: Confirmation message.
-    """
     for article in articles:
         content = article["content"]
-        embedding = embedding_model.encode(content).tolist()  # Convert to list for ChromaDB storage
+        embedding = embedding_model.encode(content).tolist()
 
         # Store in vector database
         collection.add(
@@ -191,14 +136,12 @@ def store_in_vector_db(articles):
     print("✅ News articles stored in vector database!")
     return "✅ News articles stored in vector database!"
 
-
-# ✅ Hallucination Grader Data Model
+# Hallucination Grader Data Model
 class GradeHallucinations(BaseModel):
     binary_score: str = Field(description="Answer is grounded in the facts, '1' (yes) or '0' (no')")
     explanation: str = Field(description="Explain the reasoning for the score")
 
 def handle_rate_limit(func, *args, **kwargs):
-    """Handles rate limit errors by waiting before retrying."""
     retries = 3
     for attempt in range(retries):
         try:
@@ -212,9 +155,8 @@ def handle_rate_limit(func, *args, **kwargs):
                 raise e
     raise Exception("🚨 Max retries exceeded. Could not complete the request.")
 
-# ✅ Step 1: Retrieve Relevant Articles from ChromaDB
-def retrieve_relevant_articles(user_query, top_k=5):
-    print(user_query)
+# Step 1: Retrieve Relevant Articles from ChromaDB
+def retrieve_relevant_articles(user_query, top_k=3):  # Limit to top 3 results
     query_embedding = embedding_model.encode(user_query).tolist()
     results = collection.query(query_embeddings=[query_embedding], n_results=top_k)
     print(results)
@@ -228,24 +170,23 @@ def retrieve_relevant_articles(user_query, top_k=5):
                 "url": results["metadatas"][0][i]["url"],
                 "published_at": results["metadatas"][0][i].get("published_at", "Unknown"),
                 "author": results["metadatas"][0][i].get("author", "Unknown"),
-                "content": doc[:1000]  # ✅ Limit article content to 1000 characters
+                "content": doc[:500]  # Limit content to 500 characters
             })
     else:
         print("⚠️ No relevant articles found!")
 
     return retrieved_articles
 
-# ✅ Step 2: Extract Location Using Llama3
+# Step 2: Extract Location Using Llama3
 def extract_location_from_content(news_content):
     location_prompt = f"""
     Identify the geographic location (city, state, country) from the following news article content.
     If no specific location is mentioned, return "Unknown".
 
-    Content: {news_content[:300]}  # ✅ Limit input size
+    Content: {news_content[:200]}  # Limit input size
 
     Provide output in JSON: {{"location": "City/State/Country"}}
     """
-
     response = handle_rate_limit(llm.invoke, location_prompt)
 
     try:
@@ -254,10 +195,9 @@ def extract_location_from_content(news_content):
     except json.JSONDecodeError:
         return "Unknown"
 
-# ✅ Step 3: Generate SEO-Optimized Content with Auto-Retry for Hallucinations
+# Step 3: Generate SEO-Optimized Content with Auto-Retry for Hallucinations
 def generate_fact_based_seo_content(user_query, max_retries=3):
     retrieved_articles = retrieve_relevant_articles(user_query)
-    # return retrieved_articles
 
     if not retrieved_articles:
         return {
@@ -300,7 +240,6 @@ def generate_fact_based_seo_content(user_query, max_retries=3):
         response = handle_rate_limit(llm.invoke, prompt)
         generated_content = response.content
 
-        # ✅ Step 4: Hallucination Grading with Auto-Retry
         grading_result = grade_hallucination_with_retry(generated_content, retrieved_articles)
 
         if grading_result["binary_score"] == "1":
@@ -319,13 +258,13 @@ def generate_fact_based_seo_content(user_query, max_retries=3):
 
     return {"error": "Failed after retries."}
 
-# ✅ Step 5: Hallucination Grading Function with Retry Mechanism
+# Step 5: Hallucination Grading with Retry
 def grade_hallucination_with_retry(generated_content, retrieved_articles, max_retries=3):
     retry_count = 0
     while retry_count < max_retries:
         result = grade_hallucination(generated_content, retrieved_articles)
 
-        if result["binary_score"] in ["0", "1"]:  # ✅ Valid response
+        if result["binary_score"] in ["0", "1"]:  
             return result
 
         retry_count += 1
@@ -334,12 +273,12 @@ def grade_hallucination_with_retry(generated_content, retrieved_articles, max_re
 
     return {"binary_score": "0", "explanation": "Max retries exceeded. Could not ensure factual correctness."}
 
-# ✅ Step 6: Hallucination Grading LLM Call
+# Hallucination Grading LLM Call
 def grade_hallucination(generated_content, retrieved_articles):
     hallucination_grader_prompt = f"""
-    FACTS: {json.dumps(retrieved_articles, indent=2)[:2000]}  # ✅ Limit input size
+    FACTS: {json.dumps(retrieved_articles, indent=2)[:2000]}  
 
-    STUDENT ANSWER: {generated_content[:1000]}  # ✅ Limit LLM input size
+    STUDENT ANSWER: {generated_content[:1000]}  
 
     Grade this answer:
     - Score 1: Answer is fully grounded in retrieved facts.
@@ -348,7 +287,6 @@ def grade_hallucination(generated_content, retrieved_articles):
     Provide output strictly in JSON:
     {{"binary_score": "1" or "0", "explanation": "Step-by-step reasoning"}}
     """
-
     response = handle_rate_limit(llm.invoke, hallucination_grader_prompt)
 
     try:
@@ -356,8 +294,3 @@ def grade_hallucination(generated_content, retrieved_articles):
     except json.JSONDecodeError:
         print("⚠️ JSON Parsing Failed. Raw Response:", response.content)
         return {"binary_score": "0", "explanation": "Failed to parse JSON response"}
-
-# # ✅ Example Usage:
-# user_question = query
-# seo_article = generate_fact_based_seo_content(user_question)
-# print(json.dumps(seo_article, indent=2))
