@@ -72,4 +72,5 @@ async def generate_seo_content(data: QueryInput):
 
 if __name__ == "__main__":
     import uvicorn
+    print(f"🚀 Starting FastAPI on port {PORT}...")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
