@@ -218,21 +218,18 @@ def generate_fact_based_seo_content(user_query, max_retries=3):
 
         **SEO Rules:**
         - Use the main keyword in the title and first 100 words.
-        - Create an engaging **H1** title (max 60 characters).
-        - Write a **meta description** (150-160 characters).
-        - Use **H2 & H3 subheadings** for structure.
-        - Include **internal & external links**.
-        - Readable paragraphs.
+        - Create an engaging Title in Bold and larger font 
+        - Write a meta description (150-160 characters).
+        - Write a readable article with multiple paragraphs if required
 
         **Summarized News Articles (with locations extracted):**
         {json.dumps(retrieved_articles, indent=2)}
 
         **Generate:**
-        1. Title (H1)  
-        2. SEO-optimized meta description  
-        3. Structured article (H2, H3)  
-        4. Keyword-rich content  
-        5. **Assign location-based subtopics**  
+        1. Title  
+        2. Meta description 
+        3. Keyword-rich content  
+        4. Location  
 
         **Topic:** {user_query}
         """
