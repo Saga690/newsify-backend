@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from logic import generate_fact_based_seo_content, extract_topics, fetch_news_links, extract_full_news_content, store_in_vector_db
 
+PORT = int(os.getenv("PORT", 8000))
 
 MONGO_URI = os.getenv("MONGO_URI")
 DATABASE_NAME = "test_db"
@@ -46,10 +47,6 @@ app.add_middleware(
 )
 
 
-@app.get("/users/{email}")
-async def get_user(email: str):
-   return {"email": f"{email} from backend"}  
-
 class QueryInput(BaseModel):
     query: str
 
@@ -71,3 +68,8 @@ async def generate_seo_content(data: QueryInput):
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
